@@ -1,4 +1,4 @@
-const VERSION = 'sigong-guide-v1.2.0';
+const VERSION = 'sigong-guide-v1.3.0';
 const CACHE = VERSION, EXT = 'sigong-guide-ext-v1';
 const ASSETS = ['./', './index.html', './css/app.css', './js/data.js', './js/db.js', './js/drawings.js', './js/app.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png',
   './vendor/pdfjs/pdf.min.mjs', './vendor/pdfjs/pdf.worker.min.mjs', './vendor/tesseract/tesseract.min.js', './vendor/tesseract/worker.min.js', './vendor/pdfjs/cmaps/Adobe-Korea1-0.bcmap','./vendor/pdfjs/cmaps/Adobe-Korea1-1.bcmap','./vendor/pdfjs/cmaps/Adobe-Korea1-2.bcmap','./vendor/pdfjs/cmaps/Adobe-Korea1-UCS2.bcmap','./vendor/pdfjs/cmaps/KSC-EUC-H.bcmap','./vendor/pdfjs/cmaps/KSC-EUC-V.bcmap','./vendor/pdfjs/cmaps/KSCms-UHC-H.bcmap','./vendor/pdfjs/cmaps/KSCms-UHC-HW-H.bcmap','./vendor/pdfjs/cmaps/KSCms-UHC-HW-V.bcmap','./vendor/pdfjs/cmaps/KSCms-UHC-V.bcmap','./vendor/pdfjs/cmaps/UniKS-UCS2-H.bcmap','./vendor/pdfjs/cmaps/UniKS-UCS2-V.bcmap','./vendor/pdfjs/cmaps/UniKS-UTF16-H.bcmap','./vendor/pdfjs/cmaps/UniKS-UTF16-V.bcmap'];

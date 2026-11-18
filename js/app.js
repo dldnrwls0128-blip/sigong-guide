@@ -72,8 +72,47 @@
   }
   /* ---------- 공통 UI ---------- */
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1800); }
-  function setTitle(t, back) { $('#title').textContent = t; $('#back').style.visibility = back ? 'visible' : 'hidden'; $('#back').dataset.to = back || ''; }
-  function nav(h) { location.hash = h; }
+  function setTitle(t, back) { $('#title').textContent = t; $('#back').hidden = !back; $('#back').dataset.to = back || ''; document.body.classList.toggle('sub', !!back); }
+
+  /* ---------- 히스토리(뒤로가기) ----------
+     홈 = 깊이 0. 탭 첫 화면 = 깊이 1(뒤로 → 홈). 하위 화면은 깊이 +1.
+     폰 뒤로가기/스와이프/브라우저 뒤로 = popstate → 앱 안에서 이전 화면. 홈에서 한 번 더 뒤로 = 앱 종료. */
+  const TABS = ['#/', '#/stages', '#/insp', '#/records/log', '#/records/photo', '#/records/issue', '#/records', '#/more'];
+  const isHome = h => !h || h === '#' || h === '#/' || h === '#/dash';
+  const depth = () => (history.state && typeof history.state.d === 'number') ? history.state.d : 0;
+  let dirty = false, pendingTab = null, curHash = location.hash || '#/', curDepth = 0, modalOpen = false;
+  const DIRTY_ROUTES = /^#\/(log\/|issue\/|project\/|drawing\/[^/]+\/review|insp\/new|insp\/[^/]+$)/;
+  function confirmLeave() { if (!dirty) return true; if (confirm('저장하지 않은 입력이 있습니다. 이 화면을 나갈까요?')) { dirty = false; return true; } return false; }
+  function go(h, replace) {
+    if (!h) h = '#/';
+    if (h === location.hash && !replace) { route(); return; }
+    if (!confirmLeave()) return;
+    if (replace) history.replaceState({ d: depth() }, '', h); else history.pushState({ d: depth() + 1 }, '', h);
+    curHash = h; curDepth = depth(); route(); window.scrollTo(0, 0);
+  }
+  function goTab(h) { // 탭 이동: 기록을 홈 위 한 칸으로 정리
+    if (!confirmLeave()) return;
+    const d = depth();
+    if (isHome(h)) { if (d > 0) history.go(-d); else go('#/', true); return; }
+    if (d === 0) { go(h); return; }
+    if (d === 1) { go(h, true); return; }
+    pendingTab = h; history.go(-(d - 1));
+  }
+  function goBack() {
+    if (modalOpen) { history.back(); return; }
+    if (!confirmLeave()) return;
+    if (depth() > 0) { dirty = false; history.back(); }
+    else go($('#back').dataset.to || '#/', true);
+  }
+  function onPop() {
+    if (modalOpen) { modalOpen = false; $('#modal').hidden = true; curDepth = depth(); return; }
+    if (history.state && history.state.modal) { history.back(); return; }
+    if (pendingTab) { const h = pendingTab; pendingTab = null; history.replaceState({ d: depth() }, '', h); curHash = h; curDepth = depth(); dirty = false; route(); window.scrollTo(0, 0); return; }
+    if (dirty && !confirm('저장하지 않은 입력이 있습니다. 이 화면을 나갈까요?')) { history.pushState({ d: curDepth }, '', curHash); return; }
+    dirty = false; curHash = location.hash || '#/'; curDepth = depth(); route(); window.scrollTo(0, 0);
+  }
+  function nav(h, replace) { dirty = false; go(h, replace); } // 저장·삭제 뒤 프로그램 이동(확인 없이)
+  function goTabNow(h) { dirty = false; goTab(h); }
   const badge = s => `<span class="badge b-${esc(s)}">${esc(s)}</span>`;
   function filterBar(key, opts) {
     const f = filt[key]; const p = P();
@@ -150,11 +189,11 @@
   function vDash() {
     setTitle('대시보드');
     const p = P();
-    if (!p) return `<div class="card hero"><h2>👷 시공관리 가이드</h2><p>철거부터 준공까지 단계별 할 일, 검측 체크리스트, 검측요청서, 작업일지·사진·지적사항을 한 곳에서 관리합니다.</p><p>먼저 현장을 등록하세요. 도면을 올리면 현장명·위치·동/층/호를 자동으로 채울 수 있습니다.</p><div class="row"><button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button><button class="btn" onclick="location.hash='#/drawings'">🗂 도면으로 시작</button></div></div>`;
+    if (!p) return `<div class="card hero"><h2>👷 시공관리 가이드</h2><p>철거부터 준공까지 단계별 할 일, 검측 체크리스트, 검측요청서, 작업일지·사진·지적사항을 한 곳에서 관리합니다.</p><p>먼저 현장을 등록하세요. 도면을 올리면 현장명·위치·동/층/호를 자동으로 채울 수 있습니다.</p><div class="row"><button class="btn primary" onclick="App.go('#/project/new')">+ 현장 등록</button><button class="btn" onclick="App.go('#/drawings')">🗂 도면으로 시작</button></div></div>`;
     const cs = curStage(); const pend = byP(S.inspections).filter(i => i.status !== '승인');
     const open = byP(S.issues).filter(i => i.status !== '조치완료');
     const logs = byP(S.logs).sort((a, b) => b.date.localeCompare(a.date));
-    return `<div class="card"><div class="row between"><div><div class="muted small">현재 현장</div><h2>${esc(p.name)}</h2><div class="muted small">${esc(p.location || '')} · ${p.dongs.length}개 동</div></div><button class="btn sm ghost" onclick="location.hash='#/settings'">변경</button></div></div>
+    return `<div class="card"><div class="row between"><div><div class="muted small">현재 현장</div><h2>${esc(p.name)}</h2><div class="muted small">${esc(p.location || '')} · ${p.dongs.length}개 동</div></div><button class="btn sm ghost" onclick="App.go('#/settings')">변경</button></div></div>
     <div class="stats">
       <a class="stat" href="#/stage/${cs.id}"><b>${cs.icon} ${esc(cs.name)}</b><span>현재 단계 · ${stagePct(cs)}%</span></a>
       <a class="stat" href="#/stages"><b>${overall()}%</b><span>전체 진행률</span></a>
@@ -163,10 +202,10 @@
     </div>
     <div class="quick">
       <button class="btn primary" onclick="App.newInsp()">📝 검측요청서 작성</button>
-      <button class="btn" onclick="location.hash='#/log/new'">📒 오늘 작업일지</button>
-      <button class="btn" onclick="location.hash='#/issue/new'">⚠️ 지적사항 등록</button>
-      <button class="btn" onclick="location.hash='#/records/photo'">📷 사진 기록</button>
-      <button class="btn" onclick="location.hash='#/drawings'">🗂 도면 (자동 인식)${(S.drawings || []).filter(d => d.projectId === S.cur && d.status === '확인필요').length ? ' <span class="badge b-검측요청">확인 필요</span>' : ''}</button>
+      <button class="btn" onclick="App.go('#/log/new')">📒 오늘 작업일지</button>
+      <button class="btn" onclick="App.go('#/issue/new')">⚠️ 지적사항 등록</button>
+      <button class="btn" onclick="App.go('#/records/photo')">📷 사진 기록</button>
+      <button class="btn" onclick="App.go('#/drawings')">🗂 도면 (자동 인식)${(S.drawings || []).filter(d => d.projectId === S.cur && d.status === '확인필요').length ? ' <span class="badge b-검측요청">확인 필요</span>' : ''}</button>
     </div>
     <div class="card"><h3>공정 진행</h3>${D.stages.map(st => { const v = stagePct(st); return `<a class="pbar ${st.id === cs.id ? 'cur' : ''}" href="#/stage/${st.id}"><span>${st.icon} ${esc(st.name)}</span><i style="--w:${v}%"></i><em>${v}%</em></a>`; }).join('')}</div>
     <div class="card"><h3>미결 검측 ${pend.length ? `(${pend.length})` : ''}</h3>${pend.length ? pend.slice(0, 5).map(inspRow).join('') : '<p class="muted">미결 검측이 없습니다.</p>'}</div>
@@ -196,7 +235,7 @@
       <div class="row"><input id="newTodo" placeholder="할 일 추가"><button class="btn sm primary" onclick="App.addTodo('${st.id}')">추가</button></div>
       ${Object.keys(g.hidden).length ? `<button class="btn sm ghost" onclick="App.restoreTodos('${st.id}')">삭제한 기본 항목 복원</button>` : ''}</div>
     <div class="card"><h3>핵심 확인사항</h3>${pts('착공 전', st.pre, 'pre')}${pts('시공 중', st.during, 'during')}${pts('완료 후', st.post, 'post')}</div>
-    <div class="card"><h3>관련 검측 체크리스트</h3>${tpls.length ? tpls.map(t => `<div class="row between li"><span>${esc(t.name)} <span class="muted small">(${t.items.length}항목)</span></span><span><button class="btn sm" onclick="location.hash='#/tpl/${t.id}'">보기</button> <button class="btn sm primary" onclick="App.newInsp('${t.id}')">검측</button></span></div>`).join('') : '<p class="muted">관련 템플릿 없음</p>'}</div>`;
+    <div class="card"><h3>관련 검측 체크리스트</h3>${tpls.length ? tpls.map(t => `<div class="row between li"><span>${esc(t.name)} <span class="muted small">(${t.items.length}항목)</span></span><span><button class="btn sm" onclick="App.go('#/tpl/${t.id}')">보기</button> <button class="btn sm primary" onclick="App.newInsp('${t.id}')">검측</button></span></div>`).join('') : '<p class="muted">관련 템플릿 없음</p>'}</div>`;
   }
 
   /* ---------- 화면: 검측 ---------- */
@@ -248,7 +287,7 @@
       ${ed ? `<button class="btn" onclick="App.saveInsp('${i.id}')">저장</button><button class="btn primary" onclick="App.requestInsp('${i.id}')">검측 요청</button>` : ''}
       ${i.status === '검측요청' ? `<button class="btn" onclick="App.saveInsp('${i.id}')">저장</button><button class="btn ok" onclick="App.decide('${i.id}','승인')">승인</button><button class="btn danger" onclick="App.decide('${i.id}','반려')">반려</button><button class="btn ghost" onclick="App.backToDraft('${i.id}')">작성중으로</button>` : ''}
       ${i.status === '반려' ? (child.length ? `<a class="btn" href="#/insp/${child[0].id}">재검측 보기</a>` : `<button class="btn primary" onclick="App.reinspect('${i.id}')">재검측 생성</button>`) : ''}
-      <button class="btn" onclick="App.saveInsp('${i.id}',true);location.hash='#/insp/${i.id}/print'">🖨 인쇄/PDF</button>
+      <button class="btn" onclick="App.saveInsp('${i.id}',true);App.go('#/insp/${i.id}/print')">🖨 인쇄/PDF</button>
       <button class="btn ghost danger-t" onclick="App.delInsp('${i.id}')">삭제</button></div>
     ${i.history && i.history.length ? `<div class="card"><h3>이력</h3><ul class="hist">${i.history.map(h => `<li><b>${esc(h.status)}</b> · ${esc(h.at)}${h.by ? ' · ' + esc(h.by) : ''}${h.memo ? '<br>' + esc(h.memo) : ''}</li>`).join('')}</ul></div>` : ''}`;
   }
@@ -289,13 +328,13 @@
     const tabs = `<div class="tabs">${[['log', '📒 작업일지'], ['photo', '📷 사진'], ['issue', '⚠️ 지적사항']].map(([k, n]) => `<a class="${k === tab ? 'on' : ''}" href="#/records/${k}">${n}</a>`).join('')}</div>`;
     if (tab === 'log') {
       const list = applyFilter(byP(S.logs), 'log', l => [l.work, l.memo, l.tomorrow, l.weather].join(' ')).sort((a, b) => b.date.localeCompare(a.date));
-      return tabs + `<button class="btn primary block" onclick="location.hash='#/log/new'">+ 작업일지/메모 작성</button>
+      return tabs + `<button class="btn primary block" onclick="App.go('#/log/new')">+ 작업일지/메모 작성</button>
         <div class="filters"><input type="search" placeholder="검색어" value="${esc(filt.log.q || '')}" onchange="App.setFilter('log','q',this.value)"><input type="date" value="${esc(filt.log.date || '')}" onchange="App.setFilter('log','date',this.value)"></div>
         ${list.length ? `<div class="card list">${list.map(logRow).join('')}</div>` : '<p class="muted">작업일지가 없습니다.</p>'}`;
     }
     if (tab === 'issue') {
       const list = applyFilter(byP(S.issues), 'issue', x => [x.title, x.desc, x.action, locStr(x)].join(' ')).sort((a, b) => XSTAT.indexOf(a.status) - XSTAT.indexOf(b.status) || b.createdAt - a.createdAt);
-      return tabs + `<button class="btn primary block" onclick="location.hash='#/issue/new'">+ 지적사항(부적합) 등록</button>${filterBar('issue', { status: XSTAT })}
+      return tabs + `<button class="btn primary block" onclick="App.go('#/issue/new')">+ 지적사항(부적합) 등록</button>${filterBar('issue', { status: XSTAT })}
         <p class="muted small">${list.length}건 · 미조치 ${list.filter(x => x.status === '미조치').length} · 조치중 ${list.filter(x => x.status === '조치중').length}</p>
         ${list.length ? `<div class="card list">${list.map(issueRow).join('')}</div>` : '<p class="muted">지적사항이 없습니다.</p>'}`;
     }
@@ -368,8 +407,8 @@
   }
   function vSettings() {
     setTitle('현장 · 설정 · 백업', '#/more');
-    return `<div class="card"><h3>현장 목록</h3>${S.projects.length ? S.projects.map(p => `<div class="li row between"><span><b>${esc(p.name)}</b> ${p.id === S.cur ? '<span class="badge b-승인">사용 중</span>' : ''}<br><span class="muted small">${esc(p.location || '')} · ${p.dongs.map(d => esc(d.name)).join(', ')}</span></span><span>${p.id === S.cur ? '' : `<button class="btn sm" onclick="App.useProject('${p.id}')">선택</button>`} <button class="btn sm ghost" onclick="location.hash='#/project/${p.id}'">편집</button></span></div>`).join('') : '<p class="muted">등록된 현장이 없습니다.</p>'}
-      <button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button></div>
+    return `<div class="card"><h3>현장 목록</h3>${S.projects.length ? S.projects.map(p => `<div class="li row between"><span><b>${esc(p.name)}</b> ${p.id === S.cur ? '<span class="badge b-승인">사용 중</span>' : ''}<br><span class="muted small">${esc(p.location || '')} · ${p.dongs.map(d => esc(d.name)).join(', ')}</span></span><span>${p.id === S.cur ? '' : `<button class="btn sm" onclick="App.useProject('${p.id}')">선택</button>`} <button class="btn sm ghost" onclick="App.go('#/project/${p.id}')">편집</button></span></div>`).join('') : '<p class="muted">등록된 현장이 없습니다.</p>'}
+      <button class="btn primary" onclick="App.go('#/project/new')">+ 현장 등록</button></div>
     <div class="card form"><h3>사용자</h3><label>내 이름(검측요청서 요청자 기본값)<input id="sAuthor" value="${esc(S.settings.author)}" onchange="App.setAuthor(this.value)"></label></div>
     <div class="card"><h3>데이터 백업</h3><p class="muted small">모든 데이터는 이 기기 브라우저에만 저장됩니다. 기기 변경·브라우저 데이터 삭제 전에 꼭 백업하세요. (사진 포함 JSON)</p>
       <div class="row"><button class="btn primary" onclick="App.exportJSON()">⬇ 백업 내보내기</button><label class="btn">⬆ 백업 가져오기(전체 교체)<input type="file" accept="application/json,.json" hidden onchange="App.importJSON(this)"></label></div>
@@ -398,7 +437,7 @@
     <div class="card"><h3>기본 흐름</h3><ol><li>현장 등록(동·층·호)</li><li>공정 탭에서 현재 단계의 할 일 체크</li><li>검측 탭 → 공종·위치 선택 → 체크리스트 적합/부적합 기입 → 사진 → <b>검측 요청</b></li><li>감리 확인 후 <b>승인</b> 또는 <b>반려</b> (반려 시 부적합 항목이 지적사항으로 자동 등록, 재검측 생성)</li><li>인쇄/PDF로 A4 검측요청서 출력</li><li>기록 탭에서 작업일지·사진·지적사항 조치 관리</li><li>더보기 → 도면: PDF/사진을 올리면 공사명·도면번호·동·층·호·공종을 자동 인식 → 확인 후 현장 정보·구조에 반영, 검측요청서에 관련 도면으로 연결</li></ol></div>
     <div class="card"><h3>주의</h3><p class="muted">데이터는 이 기기에만 저장됩니다(서버 없음). 설정 → 백업 내보내기로 주기적으로 보관하세요. 체크리스트 기준 수치는 반드시 현장 설계도서·시방서로 확인하세요.</p></div>`;
   }
-  const needProject = () => `<div class="card"><p>먼저 현장을 등록하세요.</p><button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button></div>`;
+  const needProject = () => `<div class="card"><p>먼저 현장을 등록하세요.</p><button class="btn primary" onclick="App.go('#/project/new')">+ 현장 등록</button></div>`;
   const notFound = () => { setTitle('없음', '#/'); return '<div class="card"><p>항목을 찾을 수 없습니다.</p><a class="btn" href="#/">홈으로</a></div>'; };
 
   /* ---------- 화면: 도면 ---------- */
@@ -513,7 +552,7 @@
     const pend = S.drawings.filter(x => x.status === '확인필요' && x.id !== id && (x.projectId === S.cur || !x.projectId));
     const fld = (key, label, input) => `<div class="rf"><div class="row between"><span class="rl">${label}</span><span>${confTag(F[key])}</span></div>${input}</div>`;
     const v0 = { projectName: I.projectName || '', address: I.address || '', title: I.title || '', number: I.number || '', scale: I.scale || '', discipline: I.discipline || '', trades: T.trades || [], dongs: T.dongs || [], floors: T.floors || [], hos: T.hos || [], units: T.units || 0 };
-    return `<div class="card"><div class="drw head"><img src="${d.thumb || ''}" alt="" onclick="location.hash='#/drawing/${d.id}'"><div><b>${esc(d.fileName)}</b><br><span class="muted small">${d.method === 'ocr' ? 'OCR(이미지 글자 인식)' : 'PDF 글자 추출'} · ${d.pages || 1}쪽 · 인식 줄 ${(d.lines || []).length}개</span><br><a class="small" href="#/drawing/${d.id}">도면 보기 ›</a></div></div>
+    return `<div class="card"><div class="drw head"><img src="${d.thumb || ''}" alt="" onclick="App.go('#/drawing/${d.id}')"><div><b>${esc(d.fileName)}</b><br><span class="muted small">${d.method === 'ocr' ? 'OCR(이미지 글자 인식)' : 'PDF 글자 추출'} · ${d.pages || 1}쪽 · 인식 줄 ${(d.lines || []).length}개</span><br><a class="small" href="#/drawing/${d.id}">도면 보기 ›</a></div></div>
       ${d.status === '인식실패' ? `<p class="red small">인식 실패: ${esc(d.error || '')}</p>` : ''}
       <p class="muted small">값을 확인하고 틀린 곳은 고쳐 주세요. <span class="conf c-high">높음</span> 표제란 칸 이름 옆에서 읽음 · <span class="conf c-mid">보통</span> 형식으로 추정 · <span class="conf c-low">낮음</span> 간접 추정</p></div>
     <div class="card form" oninput="App.reviewPreview('${d.id}')" onchange="App.reviewPreview('${d.id}')">
@@ -546,7 +585,7 @@
   }
   function inspDrawingsHtml(i, editable) {
     const r = relatedDrawings(i);
-    return `<div class="card"><h3>관련 도면 ${r.filter(x => x.linked).length ? `(${r.filter(x => x.linked).length} 첨부)` : ''}</h3>${r.length ? r.map(x => `<div class="drw sm"><img src="${x.d.thumb || ''}" alt="" onclick="location.hash='#/drawing/${x.d.id}'"><div><label class="chk"><input type="checkbox" ${x.linked ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="App.linkDrw('${i.id}','${x.d.id}',this.checked)"><span><b>${esc(x.d.info.number || '')}</b> ${esc(x.d.info.title || x.d.fileName)}</span></label>${drwTags(x.d, true)}${x.linked ? '' : '<span class="muted small">추천(위치·공종 일치)</span>'}</div></div>`).join('') : `<p class="muted small">이 위치·공종에 태그된 도면이 없습니다. <a href="#/drawings">도면 올리기 ›</a></p>`}</div>`;
+    return `<div class="card"><h3>관련 도면 ${r.filter(x => x.linked).length ? `(${r.filter(x => x.linked).length} 첨부)` : ''}</h3>${r.length ? r.map(x => `<div class="drw sm"><img src="${x.d.thumb || ''}" alt="" onclick="App.go('#/drawing/${x.d.id}')"><div><label class="chk"><input type="checkbox" ${x.linked ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="App.linkDrw('${i.id}','${x.d.id}',this.checked)"><span><b>${esc(x.d.info.number || '')}</b> ${esc(x.d.info.title || x.d.fileName)}</span></label>${drwTags(x.d, true)}${x.linked ? '' : '<span class="muted small">추천(위치·공종 일치)</span>'}</div></div>`).join('') : `<p class="muted small">이 위치·공종에 태그된 도면이 없습니다. <a href="#/drawings">도면 올리기 ›</a></p>`}</div>`;
   }
 
   /* ---------- 라우터 ---------- */
@@ -573,7 +612,7 @@
       default: html = notFound();
     }
     DRW.close();
-    $('#main').innerHTML = html;
+    $('#main').innerHTML = html; dirty = false;
     document.body.classList.toggle('printing', c === 'print');
     $$('#tabbar a').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
     hydrate(); if (a === 'records' && b === 'photo') renderGallery();
@@ -607,7 +646,7 @@
       const loc = readLoc('n'); if (!loc.dong) return toast('동을 선택하세요');
       const i = Object.assign({ id: uid(), projectId: S.cur, docNo: docNo(), trade: t.trade, tplId: t.id, tplName: t.name, date: $('#nDate').value || today(), matters: '', status: '작성중', requester: S.settings.author, inspector: '', opinion: '', photoIds: [], createdAt: String(Date.now()), history: [{ status: '작성중', at: nowStr(), by: S.settings.author }], items: t.items.map(x => ({ text: x.text, std: x.std, result: '', note: '' })) }, loc);
       i.drawingIds = relatedDrawings(i).filter(x => x.full).map(x => x.d.id);
-      S.inspections.push(i); save(); nav('#/insp/' + i.id);
+      S.inspections.push(i); save(); nav('#/insp/' + i.id, true);
     },
     linkDrw(iid, did, on) { const i = S.inspections.find(x => x.id === iid); this.collectInsp(i); i.drawingIds = (i.drawingIds || []).filter(x => x !== did); if (on) i.drawingIds.push(did); save(); rerender(); },
     collectInsp(i) {
@@ -651,7 +690,7 @@
     async delInsp(id) {
       if (!confirm('이 검측요청서를 삭제할까요?')) return; const i = S.inspections.find(x => x.id === id);
       for (const p of i.photoIds || []) await DB.delPhoto(p);
-      S.inspections = S.inspections.filter(x => x.id !== id); save(); nav('#/insp');
+      S.inspections = S.inspections.filter(x => x.id !== id); save(); nav('#/insp', true);
     },
 
     async onPhoto(ctx, input) {
@@ -678,9 +717,11 @@
     async viewPhoto(id) {
       const p = photoCache.get(id) || await DB.getPhoto(id); if (!p) return;
       const m = $('#modal'); m.innerHTML = `<div class="mbox"><img src="${p.data}"><p>${esc([p.date, p.trade, locStr(p), p.caption, p.refLabel].filter(Boolean).join(' · '))}</p><div class="row"><button class="btn" onclick="App.closeModal()">닫기</button>${p.ref ? '' : `<button class="btn ghost danger-t" onclick="App.delGalleryPhoto('${p.id}')">삭제</button>`}</div></div>`; m.hidden = false;
+      if (!modalOpen) { modalOpen = true; history.pushState({ d: depth(), modal: true }, '', location.hash); }
     },
-    closeModal() { $('#modal').hidden = true; },
-    async delGalleryPhoto(id) { if (!confirm('사진을 삭제할까요?')) return; await DB.delPhoto(id); photoCache.delete(id); this.closeModal(); rerender(); },
+    closeModal() { if (modalOpen) history.back(); else $('#modal').hidden = true; },
+    go: (h, r) => go(h, r), back: () => goBack(), tab: h => goTab(h), isDirty: () => dirty,
+    async delGalleryPhoto(id) { if (!confirm('사진을 삭제할까요?')) return; await DB.delPhoto(id); photoCache.delete(id); if (modalOpen) { modalOpen = false; $('#modal').hidden = true; history.back(); } rerender(); },
 
     collectLog() {
       if (!$('#lDate')) return; const h = location.hash.split('/'); const l = App._draftLog || S.logs.find(x => x.id === h[2]); if (!l) return;
@@ -688,10 +729,10 @@
     },
     saveLog() {
       this.collectLog(); const l = App._draftLog;
-      if (l) { delete l._new; S.logs.push(l); App._draftLog = null; save(); toast('저장했습니다'); nav('#/log/' + l.id); return; }
+      if (l) { delete l._new; S.logs.push(l); App._draftLog = null; save(); toast('저장했습니다'); nav('#/log/' + l.id, true); return; }
       save(); toast('저장했습니다'); rerender();
     },
-    async delLog(id) { if (!confirm('작업일지를 삭제할까요?')) return; const l = S.logs.find(x => x.id === id); for (const p of l.photoIds) await DB.delPhoto(p); S.logs = S.logs.filter(x => x.id !== id); save(); nav('#/records/log'); },
+    async delLog(id) { if (!confirm('작업일지를 삭제할까요?')) return; const l = S.logs.find(x => x.id === id); for (const p of l.photoIds) await DB.delPhoto(p); S.logs = S.logs.filter(x => x.id !== id); save(); nav('#/records/log', true); },
     collectIssue() {
       if (!$('#xTitle')) return; const h = location.hash.split('/'); const x = App._draftIssue || S.issues.find(v => v.id === h[2]); if (!x) return;
       Object.assign(x, readLoc('x'), { title: $('#xTitle').value.trim(), desc: $('#xDesc').value, trade: $('#xTrade').value, due: $('#xDue').value, action: $('#xAction').value });
@@ -699,10 +740,10 @@
     setIssueStat(s) { this.collectIssue(); const h = location.hash.split('/'); const x = App._draftIssue || S.issues.find(v => v.id === h[2]); x.status = s; if (s === '조치완료' && !x.doneAt) x.doneAt = today(); if (!x._new) save(); rerender(); },
     saveIssue() {
       this.collectIssue(); const x = App._draftIssue;
-      if (x) { if (!x.title) return toast('지적 내용을 입력하세요'); delete x._new; S.issues.push(x); App._draftIssue = null; save(); toast('등록했습니다'); nav('#/issue/' + x.id); return; }
+      if (x) { if (!x.title) return toast('지적 내용을 입력하세요'); delete x._new; S.issues.push(x); App._draftIssue = null; save(); toast('등록했습니다'); nav('#/issue/' + x.id, true); return; }
       save(); toast('저장했습니다'); rerender();
     },
-    async delIssue(id) { if (!confirm('지적사항을 삭제할까요?')) return; const x = S.issues.find(v => v.id === id); for (const p of x.photoIds.concat(x.actionPhotoIds || [])) await DB.delPhoto(p); S.issues = S.issues.filter(v => v.id !== id); save(); nav('#/records/issue'); },
+    async delIssue(id) { if (!confirm('지적사항을 삭제할까요?')) return; const x = S.issues.find(v => v.id === id); for (const p of x.photoIds.concat(x.actionPhotoIds || [])) await DB.delPhoto(p); S.issues = S.issues.filter(v => v.id !== id); save(); nav('#/records/issue', true); },
 
     async onDrawings(input) {
       const files = Array.from(input.files || []); input.value = ''; if (!files.length) return;
@@ -760,14 +801,14 @@
       d.status = '확인완료'; save();
       toast('적용: ' + (msgs.length ? msgs.join(', ') + ' + 도면 태그' : '도면 태그 저장'));
       const next = S.drawings.find(x => x.status === '확인필요' && x.projectId === S.cur);
-      nav(next ? '#/drawing/' + next.id + '/review' : '#/drawings');
+      nav(next ? '#/drawing/' + next.id + '/review' : '#/drawings', true);
     },
     async reparse(id) { if (!confirm('파일을 다시 읽어 인식합니다. 이 화면에서 고친 값은 사라집니다. 계속할까요?')) return; toast('다시 인식 중…'); await this.runExtract(id); rerender(); },
     async dlDrawing(id) { const d = S.drawings.find(x => x.id === id); const f = await DB.getFile(id); if (!f) return; const a = document.createElement('a'); a.href = URL.createObjectURL(f.blob); a.download = d.fileName; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000); },
     async delDrawing(id) { if (!confirm('이 도면을 삭제할까요? (검측요청서의 연결도 해제됩니다)')) return; await DB.delFile(id); S.drawings = S.drawings.filter(x => x.id !== id); S.inspections.forEach(i => { if (i.drawingIds) i.drawingIds = i.drawingIds.filter(x => x !== id); }); save(); nav('#/drawings'); },
     newTpl() { const t = { id: uid(), trade: '기타', name: '새 체크리스트', items: [] }; S.templates.push(t); save(); nav('#/tpl/' + t.id); },
     dupTpl(id) { const o = S.templates.find(x => x.id === id); const t = JSON.parse(JSON.stringify(o)); t.id = uid(); t.name += ' (복사)'; t.builtin = false; t.items.forEach(i => i.id = uid()); S.templates.push(t); save(); nav('#/tpl/' + t.id); },
-    delTpl(id) { if (!confirm('템플릿을 삭제할까요? (이미 작성한 검측서는 유지됩니다)')) return; S.templates = S.templates.filter(x => x.id !== id); save(); nav('#/tpl'); },
+    delTpl(id) { if (!confirm('템플릿을 삭제할까요? (이미 작성한 검측서는 유지됩니다)')) return; S.templates = S.templates.filter(x => x.id !== id); save(); nav('#/tpl', true); },
     resetTpls() { if (!confirm('기본 템플릿을 다시 추가할까요? 내가 만든 템플릿은 유지되고, 수정한 기본 템플릿은 원래대로 바뀝니다.')) return; S.templates = S.templates.filter(t => !t.builtin).concat(defaults().templates); save(); rerender(); },
     tplMeta(id) { const t = S.templates.find(x => x.id === id); t.trade = $('#tTrade').value.trim() || '기타'; t.name = $('#tName').value.trim() || '이름 없음'; save(); toast('저장됨'); },
     tplItem(id, k, f, v) { S.templates.find(x => x.id === id).items[k][f] = v.trim(); save(); toast('저장됨'); },
@@ -784,16 +825,16 @@
       if (dongs.some(d => d.minF > d.maxF)) return toast('최하층이 최상층보다 클 수 없습니다');
       if (id) { Object.assign(S.projects.find(p => p.id === id), { name, location: $('#pLoc').value.trim(), dongs }); }
       else { const p = { id: uid(), name, location: $('#pLoc').value.trim(), dongs, createdAt: Date.now(), curStage: null }; S.projects.push(p); S.cur = p.id; }
-      save(); toast('저장했습니다'); nav('#/');
+      save(); toast('저장했습니다'); goTabNow('#/');
     },
-    useProject(id) { S.cur = id; Object.keys(filt).forEach(k => filt[k] = {}); save(); toast('현장을 변경했습니다'); nav('#/'); },
+    useProject(id) { S.cur = id; Object.keys(filt).forEach(k => filt[k] = {}); save(); toast('현장을 변경했습니다'); goTabNow('#/'); },
     async delProject(id) {
       if (!confirm('이 현장과 관련된 검측·기록·사진이 모두 삭제됩니다. 계속할까요?')) return;
       S.projects = S.projects.filter(p => p.id !== id); ['inspections', 'logs', 'issues'].forEach(k => S[k] = S[k].filter(x => x.projectId !== id)); delete S.progress[id];
       for (const p of await DB.allPhotos()) if (p.projectId === id) await DB.delPhoto(p.id);
       for (const d of (S.drawings || []).filter(x => x.projectId === id)) await DB.delFile(d.id);
       S.drawings = (S.drawings || []).filter(x => x.projectId !== id);
-      if (S.cur === id) S.cur = S.projects[0] ? S.projects[0].id : null; save(); nav('#/settings');
+      if (S.cur === id) S.cur = S.projects[0] ? S.projects[0].id : null; save(); nav('#/settings', true);
     },
     setAuthor(v) { S.settings.author = v.trim(); save(); toast('저장됨'); },
     async exportJSON() {
@@ -850,11 +891,11 @@
         for (const p of data.photos || []) await DB.putPhoto(p);
         await DB.clearFiles();
         for (const f of data.files || []) await DB.putFile({ id: f.id, blob: await (await fetch(f.data)).blob() });
-        await save(true); toast('가져오기 완료'); nav('#/'); route();
+        await save(true); toast('가져오기 완료'); goTabNow('#/'); route();
       } catch (e) { alert('가져오기 실패: ' + e.message); }
       input.value = '';
     },
-    async wipe() { if (!confirm('모든 현장·검측·기록·사진을 삭제합니다. 백업하셨나요?')) return; S = defaults(); await DB.clearPhotos(); await DB.clearFiles(); photoCache.clear(); Object.keys(filt).forEach(k => filt[k] = {}); await save(true); nav('#/'); route(); }
+    async wipe() { if (!confirm('모든 현장·검측·기록·사진을 삭제합니다. 백업하셨나요?')) return; S = defaults(); await DB.clearPhotos(); await DB.clearFiles(); photoCache.clear(); Object.keys(filt).forEach(k => filt[k] = {}); await save(true); goTabNow('#/'); route(); }
   };
 
   /* ---------- 시작 ---------- */
@@ -862,10 +903,26 @@
     try { S = await DB.get('state'); } catch (e) { console.warn(e); }
     if (!S) { S = defaults(); await save(true); }
     S = Object.assign(defaults(), S);
-    $('#back').onclick = () => { const t = $('#back').dataset.to; if (t) nav(t); };
+    $('#back').onclick = () => goBack();
     $('#modal').onclick = e => { if (e.target.id === 'modal') App.closeModal(); };
     document.body.insertAdjacentHTML('beforeend', `<datalist id="partlist">${PARTS.map(p => `<option>${p}</option>`).join('')}</datalist><datalist id="wlist"><option>맑음</option><option>흐림</option><option>비</option><option>눈</option><option>폭염</option><option>한파</option></datalist><datalist id="tradelist">${trades().map(t => `<option>${esc(t)}</option>`).join('')}</datalist>`);
-    window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });
+    // 앱 안 링크(#/...)는 History API로 처리
+    document.addEventListener('click', e => {
+      const a = e.target.closest && e.target.closest('a[href^="#"]'); if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey) return;
+      e.preventDefault(); const h = a.getAttribute('href');
+      if (a.closest('#tabbar')) goTab(h); else go(h);
+    });
+    document.addEventListener('input', e => { if (DIRTY_ROUTES.test(location.hash) && e.target.closest('#main') && !e.target.closest('.filters') && e.target.type !== 'file') dirty = true; });
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('hashchange', () => { if (history.state) return; history.replaceState({ d: curDepth + 1 }, '', location.hash); onPop(); }); // 주소창에서 직접 바꾼 경우
+    window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    // 시작: 홈을 맨 아래(깊이 0)에 깔아 둔다
+    if (!history.state || typeof history.state.d !== 'number') {
+      const h = location.hash;
+      if (isHome(h)) history.replaceState({ d: 0 }, '', '#/');
+      else { history.replaceState({ d: 0 }, '', '#/'); history.pushState({ d: TABS.includes(h) ? 1 : 2 }, '', h); }
+    } else if (history.state.modal) { history.replaceState({ d: history.state.d }, '', location.hash); }
+    curHash = location.hash || '#/'; curDepth = depth();
     route();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
   }
