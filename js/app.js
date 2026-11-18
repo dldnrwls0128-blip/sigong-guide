@@ -14,13 +14,13 @@
   const PARTS = ['기초', '벽체', '기둥', '보', '슬래브', '계단', '지붕', '외벽', '세대 내부', '욕실', '발코니', '코어', '지하주차장', '옥상', '공용부'];
 
   let S = null; // 앱 상태
-  const filt = { insp: {}, issue: {}, photo: {}, log: {} };
+  const filt = { insp: {}, issue: {}, photo: {}, log: {}, drw: {} };
   const photoCache = new Map();
 
   /* ---------- 상태 ---------- */
   function defaults() {
     return {
-      v: 1, projects: [], cur: null, progress: {}, inspections: [], logs: [], issues: [],
+      v: 2, projects: [], cur: null, progress: {}, inspections: [], logs: [], issues: [], drawings: [],
       templates: D.templates.map(t => ({ id: uid(), trade: t.trade, name: t.name, builtin: true, items: t.items.map(i => ({ id: uid(), text: i.text, std: i.std })) })),
       settings: { author: '' }
     };
@@ -63,6 +63,13 @@
   }
   function readLoc(pre) { return { dong: $('#' + pre + 'dong').value, floor: $('#' + pre + 'floor').value, ho: $('#' + pre + 'ho').value, part: $('#' + pre + 'part').value.trim() }; }
 
+  const blobToDataURL = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
+  function applyParsed(d) {
+    const F = DRW.parse(d.lines || []); const g = k => (F[k] ? F[k].v : '');
+    d.fields = F;
+    d.info = { projectName: g('projectName'), address: g('address'), title: g('title'), number: g('number'), scale: g('scale'), discipline: g('discipline') };
+    d.tags = { dongs: g('dongs') || [], floors: g('floors') || [], hos: g('hos') || [], trades: g('trades') || [], units: g('units') || 0 };
+  }
   /* ---------- 공통 UI ---------- */
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1800); }
   function setTitle(t, back) { $('#title').textContent = t; $('#back').style.visibility = back ? 'visible' : 'hidden'; $('#back').dataset.to = back || ''; }
@@ -143,7 +150,7 @@
   function vDash() {
     setTitle('대시보드');
     const p = P();
-    if (!p) return `<div class="card hero"><h2>👷 시공관리 가이드</h2><p>철거부터 준공까지 단계별 할 일, 검측 체크리스트, 검측요청서, 작업일지·사진·지적사항을 한 곳에서 관리합니다.</p><p>먼저 현장을 등록하세요.</p><button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button></div>`;
+    if (!p) return `<div class="card hero"><h2>👷 시공관리 가이드</h2><p>철거부터 준공까지 단계별 할 일, 검측 체크리스트, 검측요청서, 작업일지·사진·지적사항을 한 곳에서 관리합니다.</p><p>먼저 현장을 등록하세요. 도면을 올리면 현장명·위치·동/층/호를 자동으로 채울 수 있습니다.</p><div class="row"><button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button><button class="btn" onclick="location.hash='#/drawings'">🗂 도면으로 시작</button></div></div>`;
     const cs = curStage(); const pend = byP(S.inspections).filter(i => i.status !== '승인');
     const open = byP(S.issues).filter(i => i.status !== '조치완료');
     const logs = byP(S.logs).sort((a, b) => b.date.localeCompare(a.date));
@@ -159,6 +166,7 @@
       <button class="btn" onclick="location.hash='#/log/new'">📒 오늘 작업일지</button>
       <button class="btn" onclick="location.hash='#/issue/new'">⚠️ 지적사항 등록</button>
       <button class="btn" onclick="location.hash='#/records/photo'">📷 사진 기록</button>
+      <button class="btn" onclick="location.hash='#/drawings'">🗂 도면 (자동 인식)${(S.drawings || []).filter(d => d.projectId === S.cur && d.status === '확인필요').length ? ' <span class="badge b-검측요청">확인 필요</span>' : ''}</button>
     </div>
     <div class="card"><h3>공정 진행</h3>${D.stages.map(st => { const v = stagePct(st); return `<a class="pbar ${st.id === cs.id ? 'cur' : ''}" href="#/stage/${st.id}"><span>${st.icon} ${esc(st.name)}</span><i style="--w:${v}%"></i><em>${v}%</em></a>`; }).join('')}</div>
     <div class="card"><h3>미결 검측 ${pend.length ? `(${pend.length})` : ''}</h3>${pend.length ? pend.slice(0, 5).map(inspRow).join('') : '<p class="muted">미결 검측이 없습니다.</p>'}</div>
@@ -227,6 +235,7 @@
       ${ed ? locFields(i, 'e') : `<p><b>위치</b> ${esc(locStr(i) || '-')}</p>`}
       <div class="grid2"><label>검측 요구일<input type="date" id="eDate" value="${esc(i.date)}" ${ed ? '' : 'disabled'}></label><label>체크리스트<input value="${esc(i.tplName)}" disabled></label></div>
       <label>검측 요청사항<textarea id="eMatters" rows="2" ${ed ? '' : 'disabled'} placeholder="예: 15층 슬래브 철근 배근 완료, 타설 전 검측 요청">${esc(i.matters || '')}</textarea></label></div>
+    ${inspDrawingsHtml(i, i.status !== '승인')}
     <div class="card"><div class="row between"><h3>체크리스트</h3><span class="muted small">적합 ${cnt('적합')} · 부적합 <span class="red">${cnt('부적합')}</span> · N/A ${cnt('해당없음')} · 미기입 ${left}</span></div>
       ${mark ? `<div class="row"><button class="btn sm ghost" onclick="App.markAll('${i.id}')">미기입 항목 모두 적합</button></div>` : ''}
       <ol class="checks">${i.items.map((x, k) => `<li class="${x.result === '부적합' ? 'bad' : ''}"><div class="ct">${esc(x.text)}${x.std ? `<div class="std">기준: ${esc(x.std)}</div>` : ''}</div>
@@ -257,6 +266,7 @@
         <tr><th>공종</th><td>${esc(i.trade)}</td><th>검측 요구일</th><td>${esc(i.date)}</td></tr>
         <tr><th>검측 위치</th><td colspan="3">${esc(locStr(i))}</td></tr>
         <tr><th>요청 사항</th><td colspan="3">${esc(i.matters || '')}</td></tr>
+        <tr><th>관련 도면</th><td colspan="3">${(i.drawingIds || []).map(id => S.drawings.find(d => d.id === id)).filter(Boolean).map(d => esc([d.info.number, d.info.title, d.info.scale ? '(' + d.info.scale + ')' : ''].filter(Boolean).join(' '))).join('<br>') || '-'}</td></tr>
         <tr><th>진행 상태</th><td>${esc(i.status)}</td><th>체크리스트</th><td>${esc(i.tplName)}</td></tr></table>
       <table class="doc chk"><thead><tr><th style="width:6%">No</th><th>검측 항목</th><th style="width:16%">기준</th><th style="width:8%">적합</th><th style="width:8%">부적합</th><th style="width:8%">N/A</th><th style="width:18%">비고</th></tr></thead>
         <tbody>${i.items.map((x, k) => `<tr><td class="c">${k + 1}</td><td>${esc(x.text)}</td><td class="small">${esc(x.std || '')}</td><td class="c">${ck(x, '적합')}</td><td class="c red">${ck(x, '부적합')}</td><td class="c">${ck(x, '해당없음')}</td><td class="small">${esc(x.note || '')}</td></tr>`).join('')}</tbody></table>
@@ -354,7 +364,7 @@
   /* ---------- 화면: 더보기/설정 ---------- */
   function vMore() {
     setTitle('더보기');
-    return `<div class="card list"><a class="li" href="#/tpl">✅ 검측 체크리스트 템플릿 관리</a><a class="li" href="#/settings">🏗 현장 관리 · 백업</a><a class="li" href="#/stages">📋 단계별 공정 가이드</a><a class="li" href="#/help">❓ 사용법 · 설치 방법</a></div>`;
+    return `<div class="card list"><a class="li" href="#/drawings">🗂 도면 (올리면 정보 자동 인식)</a><a class="li" href="#/tpl">✅ 검측 체크리스트 템플릿 관리</a><a class="li" href="#/settings">🏗 현장 관리 · 백업</a><a class="li" href="#/stages">📋 단계별 공정 가이드</a><a class="li" href="#/help">❓ 사용법 · 설치 방법</a></div>`;
   }
   function vSettings() {
     setTitle('현장 · 설정 · 백업', '#/more');
@@ -383,11 +393,158 @@
   function vHelp() {
     setTitle('사용법', '#/more');
     return `<div class="card"><h3>휴대폰에 설치</h3><ol><li>앱 주소(https)를 휴대폰 크롬/사파리로 엽니다.</li><li>안드로이드 크롬: 메뉴(⋮) → <b>홈 화면에 추가 / 앱 설치</b>. 아이폰 사파리: 공유 → <b>홈 화면에 추가</b>.</li><li>한 번 연 뒤에는 인터넷 없이도 열립니다.</li></ol></div>
-    <div class="card"><h3>기본 흐름</h3><ol><li>현장 등록(동·층·호)</li><li>공정 탭에서 현재 단계의 할 일 체크</li><li>검측 탭 → 공종·위치 선택 → 체크리스트 적합/부적합 기입 → 사진 → <b>검측 요청</b></li><li>감리 확인 후 <b>승인</b> 또는 <b>반려</b> (반려 시 부적합 항목이 지적사항으로 자동 등록, 재검측 생성)</li><li>인쇄/PDF로 A4 검측요청서 출력</li><li>기록 탭에서 작업일지·사진·지적사항 조치 관리</li></ol></div>
+    <div class="card"><h3>기본 흐름</h3><ol><li>현장 등록(동·층·호)</li><li>공정 탭에서 현재 단계의 할 일 체크</li><li>검측 탭 → 공종·위치 선택 → 체크리스트 적합/부적합 기입 → 사진 → <b>검측 요청</b></li><li>감리 확인 후 <b>승인</b> 또는 <b>반려</b> (반려 시 부적합 항목이 지적사항으로 자동 등록, 재검측 생성)</li><li>인쇄/PDF로 A4 검측요청서 출력</li><li>기록 탭에서 작업일지·사진·지적사항 조치 관리</li><li>더보기 → 도면: PDF/사진을 올리면 공사명·도면번호·동·층·호·공종을 자동 인식 → 확인 후 현장 정보·구조에 반영, 검측요청서에 관련 도면으로 연결</li></ol></div>
     <div class="card"><h3>주의</h3><p class="muted">데이터는 이 기기에만 저장됩니다(서버 없음). 설정 → 백업 내보내기로 주기적으로 보관하세요. 체크리스트 기준 수치는 반드시 현장 설계도서·시방서로 확인하세요.</p></div>`;
   }
   const needProject = () => `<div class="card"><p>먼저 현장을 등록하세요.</p><button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button></div>`;
   const notFound = () => { setTitle('없음', '#/'); return '<div class="card"><p>항목을 찾을 수 없습니다.</p><a class="btn" href="#/">홈으로</a></div>'; };
+
+  /* ---------- 화면: 도면 ---------- */
+  const DISCS = ['건축', '구조', '기계설비', '전기', '소방', '통신', '토목', '조경'];
+  const CONF = { high: ['높음', 'c-high'], mid: ['보통', 'c-mid'], low: ['낮음', 'c-low'] };
+  const fOrder = x => x === 'PH' ? 1000 : x === '옥상' ? 1001 : /^B\d+$/.test(x) ? -parseInt(x.slice(1), 10) : parseInt(x, 10) || 2000;
+  function fmtFloors(arr) { // ['3F','4F',...,'15F','PH'] → '3F~15F, PH'
+    const a = (arr || []).slice().sort((x, y) => fOrder(x) - fOrder(y)); const out = []; let i = 0;
+    while (i < a.length) { let j = i; while (j + 1 < a.length && fOrder(a[j + 1]) === fOrder(a[j]) + 1 && fOrder(a[j]) < 999 && !(fOrder(a[j]) === -1 && fOrder(a[j + 1]) === 0)) j++; out.push(j - i >= 2 ? a[i] + '~' + a[j] : a.slice(i, j + 1).join(', ')); i = j + 1; }
+    return out.join(', ');
+  }
+  function normFloor(t) { t = t.trim().toUpperCase().replace(/\s/g, ''); let m; if ((m = t.match(/^(?:B|지하)(\d+)(?:F|층)?$/))) return 'B' + (+m[1]); if ((m = t.match(/^(\d+)(?:F|층)?$/))) return +m[1] ? (+m[1]) + 'F' : ''; if (/^(PH|옥탑)/.test(t)) return 'PH'; if (/^(옥상|지붕|ROOF)/.test(t)) return '옥상'; return ''; }
+  function parseFloors(s) {
+    const out = [];
+    String(s || '').split(/[,\s]+/).filter(Boolean).forEach(tok => {
+      const r = tok.split(/[~∼]/);
+      if (r.length === 2) { const a = fOrder(normFloor(r[0])), b = fOrder(normFloor(r[1])); if (a < 999 && b < 999 && b >= a && b - a <= 120) { for (let n = a; n <= b; n++) if (n) out.push(n < 0 ? 'B' + (-n) : n + 'F'); return; } }
+      const f = normFloor(tok); if (f) out.push(f);
+    });
+    return Array.from(new Set(out)).sort((x, y) => fOrder(x) - fOrder(y));
+  }
+  const splitList = (s, suf) => Array.from(new Set(String(s || '').split(/[,\s]+/).map(x => x.trim()).filter(Boolean).map(x => suf && /^\d+$/.test(x) ? x + suf : x)));
+  function drwLabel(d) { return [d.info.number, d.info.title].filter(Boolean).join(' ') || d.fileName; }
+  function drwTags(d, small) {
+    const t = d.tags || {}; const c = [];
+    (t.dongs || []).forEach(x => c.push(x)); if ((t.floors || []).length) c.push(fmtFloors(t.floors)); if ((t.hos || []).length) c.push(t.hos.length > 3 ? t.hos[0] + ' 외 ' + (t.hos.length - 1) : t.hos.join(', '));
+    (t.trades || []).forEach(x => c.push(x)); if (d.info.discipline) c.unshift(d.info.discipline);
+    return c.length ? `<div class="chips ${small ? 'sm' : ''}">${c.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : '<div class="muted small">태그 없음</div>';
+  }
+  function drwRow(d) {
+    return `<a class="drw" href="#/drawing/${d.id}${d.status === '확인필요' ? '/review' : ''}">${d.thumb ? `<img src="${d.thumb}" alt="">` : '<span class="nothumb">📄</span>'}<div><b>${esc(d.info.number || '')}</b> ${esc(d.info.title || d.fileName)}<br>${d.status === '인식중' ? '' : drwTags(d, true)}<span class="muted small">${esc(d.fileName)}${d.pages > 1 ? ' · ' + d.pages + '쪽' : ''}</span> ${d.status === '확인완료' ? '' : `<span class="badge b-${d.status === '인식실패' ? '반려' : '검측요청'}" id="ds-${d.id}">${esc(d.statusText || d.status)}</span>`}</div></a>`;
+  }
+  function vDrawings() {
+    setTitle('도면', '#/more');
+    const f = filt.drw; const p = P();
+    let list = (S.drawings || []).filter(d => d.projectId === S.cur || (!S.cur && !d.projectId));
+    list = list.filter(d => { const t = d.tags || {}; return (!f.dong || (t.dongs || []).includes(f.dong)) && (!f.floor || (t.floors || []).includes(f.floor)) && (!f.trade || (t.trades || []).includes(f.trade)) && (!f.q || [d.info.number, d.info.title, d.fileName].join(' ').toLowerCase().includes(f.q.toLowerCase())); }).sort((a, b) => (a.info.number || '~').localeCompare(b.info.number || '~'));
+    const pend = list.filter(d => d.status === '확인필요').length;
+    return `<div class="card"><h3>도면 올리기</h3><p class="muted small">PDF·사진(JPG/PNG)을 여러 개 한꺼번에 올릴 수 있습니다. 표제란의 공사명·도면명·도면번호·축척·동·층·호수·공종을 자동으로 읽어 <b>확인 화면</b>을 보여 줍니다. 확인 전에는 현장 정보를 바꾸지 않습니다.</p>
+      <label class="btn primary block">📤 도면 파일 선택<input type="file" id="drwInput" accept="application/pdf,.pdf,image/*" multiple hidden onchange="App.onDrawings(this)"></label>
+      <p class="muted small">※ CAD에서 내보낸 PDF는 글자를 바로 읽습니다(오프라인 가능). 스캔 PDF·사진은 OCR을 쓰며, <b>OCR은 처음 한 번 인터넷 연결이 필요</b>합니다(엔진·한글 데이터 약 수 MB 내려받은 뒤 기기에 저장).</p><div id="drwProg"></div></div>
+      ${pend ? `<p class="small"><span class="badge b-검측요청">확인 필요 ${pend}</span> 인식 결과를 확인해 주세요.</p>` : ''}
+      <div class="filters"><input type="search" placeholder="도면번호·도면명 검색" value="${esc(f.q || '')}" onchange="App.setFilter('drw','q',this.value)">
+      <select onchange="App.setFilter('drw','dong',this.value)"><option value="">전체 동</option>${(p ? p.dongs.map(d => d.name) : []).concat(Array.from(new Set((S.drawings || []).flatMap(d => (d.tags || {}).dongs || [])))).filter((v, i, a) => a.indexOf(v) === i).map(x => `<option ${f.dong === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <select onchange="App.setFilter('drw','floor',this.value)"><option value="">전체 층</option>${Array.from(new Set((S.drawings || []).flatMap(d => (d.tags || {}).floors || []))).sort((a, b) => fOrder(a) - fOrder(b)).map(x => `<option ${f.floor === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <select onchange="App.setFilter('drw','trade',this.value)"><option value="">전체 공종</option>${trades().map(x => `<option ${f.trade === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      ${Object.values(f).some(Boolean) ? `<button class="btn sm ghost" onclick="App.clearFilter('drw')">필터 초기화</button>` : ''}</div>
+      <p class="muted small">${list.length}장</p>${list.length ? `<div class="card list">${list.map(drwRow).join('')}</div>` : '<p class="muted">도면이 없습니다.</p>'}`;
+  }
+  function vDrawing(id) {
+    const d = (S.drawings || []).find(x => x.id === id); if (!d) return notFound();
+    setTitle(d.info.number || '도면 보기', '#/drawings');
+    return `<div class="card"><div class="row between"><div><b>${esc(d.info.number || '')}</b> ${esc(d.info.title || d.fileName)}<div class="muted small">${esc([d.info.scale, d.info.projectName].filter(Boolean).join(' · '))}</div></div></div>${drwTags(d)}</div>
+      <div class="dtool"><button class="btn sm" onclick="DRW.pageTo(-1)">◀</button><span id="dpage">-</span><button class="btn sm" onclick="DRW.pageTo(1)">▶</button><span class="sp"></span><button class="btn sm" onclick="DRW.zoomOut()">－</button><button class="btn sm" id="dzoom" onclick="DRW.fit()">맞춤</button><button class="btn sm" onclick="DRW.zoomIn()">＋</button></div>
+      <div class="dview" id="dview"><p class="muted">도면 불러오는 중…</p></div>
+      <p class="muted small">두 손가락으로 확대, 한 손가락으로 이동, 두 번 탭하면 2배 확대.</p>
+      <div class="actions"><a class="btn primary" href="#/drawing/${d.id}/review">🔎 인식 결과 확인·수정</a><button class="btn" onclick="App.dlDrawing('${d.id}')">⬇ 원본 저장</button><button class="btn ghost danger-t" onclick="App.delDrawing('${d.id}')">삭제</button></div>`;
+  }
+  async function mountViewer(id) {
+    const d = S.drawings.find(x => x.id === id); const el = $('#dview'); if (!d || !el) return;
+    const f = await DB.getFile(id); if (!f) { el.innerHTML = '<p class="muted">원본 파일이 없습니다.</p>'; return; }
+    try { await DRW.view(el, f.blob, d.mime, i => { const a = $('#dpage'), z = $('#dzoom'); if (a) a.textContent = `${i.page}/${i.pages}`; if (z) z.textContent = Math.round(i.zoom * 100) + '%'; }); }
+    catch (e) { console.warn(e); el.innerHTML = '<p class="red">도면을 표시하지 못했습니다: ' + esc(e.message) + '</p>'; }
+  }
+  function confTag(fl) { if (!fl) return '<span class="conf c-none">인식 안 됨</span>'; const c = CONF[fl.conf] || CONF.low; return `<span class="conf ${c[1]}" title="${esc(fl.why || '')}">${c[0]}</span><span class="muted small"> ${esc(fl.why || '')}</span>`; }
+  function planStruct(p, dongs, floors, hos, unitsHint) {
+    const nums = floors.map(fOrder).filter(n => n < 999);
+    let units = Math.max(unitsHint || 0, ...hos.map(h => parseInt(h, 10) % 100).filter(n => n > 0 && n < 100), 0);
+    const ref = p && p.dongs[0] ? p.dongs[0] : null;
+    const adds = [], mods = [];
+    dongs.forEach(name => {
+      const ex = p && p.dongs.find(x => x.name === name);
+      if (!ex) {
+        const minF = nums.length ? Math.min(Math.min(...nums), ref ? ref.minF : 1) : (ref ? ref.minF : -1);
+        const maxF = nums.length ? Math.max(Math.max(...nums), ref ? ref.maxF : 1) : (ref ? ref.maxF : 15);
+        adds.push({ name, minF, maxF, units: units || (ref ? ref.units : 4), guessed: !units || !nums.length });
+      } else {
+        const ch = {}; if (nums.length && Math.min(...nums) < ex.minF) ch.minF = Math.min(...nums); if (nums.length && Math.max(...nums) > ex.maxF) ch.maxF = Math.max(...nums); if (units > ex.units) ch.units = units;
+        if (Object.keys(ch).length) mods.push({ name, from: { minF: ex.minF, maxF: ex.maxF, units: ex.units }, to: Object.assign({ minF: ex.minF, maxF: ex.maxF, units: ex.units }, ch) });
+      }
+    });
+    return { adds, mods };
+  }
+  const fl = n => n < 0 ? 'B' + (-n) : n + 'F';
+  function readReview() {
+    return {
+      projectName: $('#rProj').value.trim(), address: $('#rAddr').value.trim(), title: $('#rTitle').value.trim(), number: $('#rNum').value.trim(), scale: $('#rScale').value.trim(), discipline: $('#rDisc').value,
+      trades: $$('.rTrade:checked').map(x => x.value), dongs: splitList($('#rDongs').value, '동'), floors: parseFloors($('#rFloors').value), hos: splitList($('#rHos').value, '호'), units: +$('#rUnits').value || 0
+    };
+  }
+  function reviewApplyHtml(d, v) {
+    const p = P(); const pr = d.projectId ? S.projects.find(x => x.id === d.projectId) : p;
+    let a = '';
+    if (!pr) a = `<label class="chk"><input type="checkbox" id="aNewProj" checked> <b>이 정보로 새 현장 등록</b> — ${esc(v.projectName || '(현장명 없음)')}${v.address ? ' · ' + esc(v.address) : ''}</label>`;
+    else {
+      const row = (key, label, cur, nv) => !nv || nv === cur ? '' : `<label class="chk"><input type="checkbox" id="${key}" ${cur ? '' : 'checked'}> ${label}: <span class="muted">${esc(cur || '(비어 있음)')}</span> → <b>${esc(nv)}</b>${cur ? ' <span class="red small">(기존 값 바꿈)</span>' : ''}</label>`;
+      a = row('aName', '현장명', pr.name, v.projectName) + row('aLoc', '위치', pr.location, v.address);
+      if (!a) a = '<p class="muted small">현장 정보와 같거나 새 정보가 없습니다.</p>';
+    }
+    const plan = planStruct(pr, v.dongs, v.floors, v.hos, v.units);
+    let b = '';
+    if (!v.dongs.length) b = `<p class="muted small">동이 인식되지 않아 구조 병합은 하지 않습니다. 위 ‘동’ 칸에 입력하면 병합할 수 있습니다.${v.floors.length ? ' (층 태그는 도면에 저장됩니다)' : ''}</p>`;
+    else if (!plan.adds.length && !plan.mods.length) b = '<p class="muted small">이미 현장 구조에 모두 있습니다. 추가할 것이 없습니다.</p>';
+    else b = `<label class="chk"><input type="checkbox" id="aStruct" checked> <b>현장 동/층/호 구조에 병합</b> (중복 없이 추가·확장만)</label><ul class="small">${plan.adds.map(x => `<li>새 동 <b>${esc(x.name)}</b>: ${fl(x.minF)}~${fl(x.maxF)}, 층당 ${x.units}호${x.guessed ? ' <span class="muted">(인식 안 된 층·호수는 기존 동 기준 — 나중에 현장 편집에서 수정)</span>' : ''}</li>`).join('')}${plan.mods.map(x => `<li><b>${esc(x.name)}</b>: ${fl(x.from.minF)}~${fl(x.from.maxF)}·${x.from.units}호 → <b>${fl(x.to.minF)}~${fl(x.to.maxF)}·${x.to.units}호</b></li>`).join('')}</ul>`;
+    return `<h4>① 현장 정보</h4>${a}<h4>② 위치 구조</h4>${b}<h4>③ 도면 태그</h4><p class="small">${v.dongs.length || v.floors.length || v.trades.length ? `이 도면을 <b>${esc([v.dongs.join(', '), fmtFloors(v.floors), v.trades.join(', ')].filter(Boolean).join(' / '))}</b> 검측요청서의 ‘관련 도면’에 띄웁니다.` : '태그가 없으면 검측요청서에 추천되지 않습니다.'}</p>`;
+  }
+  function vReview(id) {
+    const d = (S.drawings || []).find(x => x.id === id); if (!d) return notFound();
+    setTitle('자동 인식 결과', '#/drawings');
+    const F = d.fields || {}; const I = d.info, T = d.tags || {};
+    const pend = S.drawings.filter(x => x.status === '확인필요' && x.id !== id && (x.projectId === S.cur || !x.projectId));
+    const fld = (key, label, input) => `<div class="rf"><div class="row between"><span class="rl">${label}</span><span>${confTag(F[key])}</span></div>${input}</div>`;
+    const v0 = { projectName: I.projectName || '', address: I.address || '', title: I.title || '', number: I.number || '', scale: I.scale || '', discipline: I.discipline || '', trades: T.trades || [], dongs: T.dongs || [], floors: T.floors || [], hos: T.hos || [], units: T.units || 0 };
+    return `<div class="card"><div class="drw head"><img src="${d.thumb || ''}" alt="" onclick="location.hash='#/drawing/${d.id}'"><div><b>${esc(d.fileName)}</b><br><span class="muted small">${d.method === 'ocr' ? 'OCR(이미지 글자 인식)' : 'PDF 글자 추출'} · ${d.pages || 1}쪽 · 인식 줄 ${(d.lines || []).length}개</span><br><a class="small" href="#/drawing/${d.id}">도면 보기 ›</a></div></div>
+      ${d.status === '인식실패' ? `<p class="red small">인식 실패: ${esc(d.error || '')}</p>` : ''}
+      <p class="muted small">값을 확인하고 틀린 곳은 고쳐 주세요. <span class="conf c-high">높음</span> 표제란 칸 이름 옆에서 읽음 · <span class="conf c-mid">보통</span> 형식으로 추정 · <span class="conf c-low">낮음</span> 간접 추정</p></div>
+    <div class="card form" oninput="App.reviewPreview('${d.id}')" onchange="App.reviewPreview('${d.id}')">
+      ${fld('projectName', '공사명(현장명)', `<input id="rProj" value="${esc(v0.projectName)}">`)}
+      ${fld('address', '대지위치', `<input id="rAddr" value="${esc(v0.address)}">`)}
+      ${fld('title', '도면명', `<input id="rTitle" value="${esc(v0.title)}">`)}
+      <div class="grid2">${fld('number', '도면번호', `<input id="rNum" value="${esc(v0.number)}">`)}${fld('scale', '축척', `<input id="rScale" value="${esc(v0.scale)}">`)}</div>
+      ${fld('discipline', '분야', `<select id="rDisc"><option value="">-</option>${DISCS.map(x => `<option ${x === v0.discipline ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}
+      ${fld('trades', '공종 (검측 연결)', `<div class="chips pick">${trades().map(t => `<label><input type="checkbox" class="rTrade" value="${esc(t)}" ${v0.trades.includes(t) ? 'checked' : ''}><span>${esc(t)}</span></label>`).join('')}</div>`)}
+      ${fld('dongs', '동', `<input id="rDongs" value="${esc(v0.dongs.join(', '))}" placeholder="예: 101동, 102동">`)}
+      ${fld('floors', '층', `<input id="rFloors" value="${esc(fmtFloors(v0.floors))}" placeholder="예: B2, 3F~15F, PH">`)}
+      <div class="grid2">${fld('hos', '호수', `<input id="rHos" value="${esc(v0.hos.join(', '))}" placeholder="예: 1501호, 1502호">`)}${fld('units', '층당 호수', `<input id="rUnits" type="number" min="0" value="${v0.units || ''}">`)}</div>
+    </div>
+    <div class="card" id="rApply">${reviewApplyHtml(d, v0)}</div>
+    <div class="actions"><button class="btn primary" onclick="App.applyReview('${d.id}')">✔ 확인하고 적용</button><button class="btn" onclick="App.reparse('${d.id}')">↻ 다시 인식</button></div>
+    ${pend.length ? `<p class="small">확인 대기 도면 ${pend.length}장 더 있음</p>` : ''}
+    <details class="card"><summary>인식된 원문 보기 (${(d.lines || []).length}줄)</summary><pre class="raw">${esc((d.lines || []).join('\n'))}</pre></details>`;
+  }
+  function relatedDrawings(i) {
+    const out = [];
+    (S.drawings || []).filter(d => d.projectId === S.cur && d.status !== '인식중').forEach(d => {
+      const t = d.tags || {}; const linked = (i.drawingIds || []).includes(d.id);
+      const dn = (t.dongs || []).length ? (t.dongs.includes(i.dong) ? 2 : -99) : 0;
+      const fr = (t.floors || []).length ? (t.floors.includes(i.floor) ? 2 : -99) : 0;
+      const tr = (t.trades || []).length ? (t.trades.includes(i.trade) ? 3 : -99) : 0;
+      const sc = dn + fr + tr;
+      if (linked || sc > 0) out.push({ d, sc, linked, full: sc > 0 && tr > 0 && (dn > 0 || fr > 0) });
+    });
+    return out.sort((a, b) => (b.linked - a.linked) || (b.sc - a.sc));
+  }
+  function inspDrawingsHtml(i, editable) {
+    const r = relatedDrawings(i);
+    return `<div class="card"><h3>관련 도면 ${r.filter(x => x.linked).length ? `(${r.filter(x => x.linked).length} 첨부)` : ''}</h3>${r.length ? r.map(x => `<div class="drw sm"><img src="${x.d.thumb || ''}" alt="" onclick="location.hash='#/drawing/${x.d.id}'"><div><label class="chk"><input type="checkbox" ${x.linked ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="App.linkDrw('${i.id}','${x.d.id}',this.checked)"><span><b>${esc(x.d.info.number || '')}</b> ${esc(x.d.info.title || x.d.fileName)}</span></label>${drwTags(x.d, true)}${x.linked ? '' : '<span class="muted small">추천(위치·공종 일치)</span>'}</div></div>`).join('') : `<p class="muted small">이 위치·공종에 태그된 도면이 없습니다. <a href="#/drawings">도면 올리기 ›</a></p>`}</div>`;
+  }
 
   /* ---------- 라우터 ---------- */
   function route() {
@@ -408,13 +565,17 @@
       case 'settings': html = vSettings(); tab = 'more'; break;
       case 'project': html = vProject(b); tab = 'more'; break;
       case 'help': html = vHelp(); tab = 'more'; break;
+      case 'drawings': html = vDrawings(); tab = 'more'; break;
+      case 'drawing': html = b && c === 'review' ? vReview(b) : vDrawing(b); tab = 'more'; break;
       default: html = notFound();
     }
+    DRW.close();
     $('#main').innerHTML = html;
     document.body.classList.toggle('printing', c === 'print');
     $$('#tabbar a').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
     hydrate(); if (a === 'records' && b === 'photo') renderGallery();
     if (a === 'settings') usage();
+    if (a === 'drawing' && b && c !== 'review') mountViewer(b);
   }
   function rerender() { const y = window.scrollY; route(); window.scrollTo(0, y); }
   async function usage() { try { const e = await navigator.storage.estimate(); const el = $('#usage'); if (el) el.textContent = `사용 중 저장공간: ${(e.usage / 1048576).toFixed(1)}MB / 가용 ${(e.quota / 1048576).toFixed(0)}MB`; } catch (e) { } }
@@ -442,8 +603,10 @@
       const t = S.templates.find(x => x.id === $('#nTpl').value); if (!t) return toast('체크리스트를 선택하세요');
       const loc = readLoc('n'); if (!loc.dong) return toast('동을 선택하세요');
       const i = Object.assign({ id: uid(), projectId: S.cur, docNo: docNo(), trade: t.trade, tplId: t.id, tplName: t.name, date: $('#nDate').value || today(), matters: '', status: '작성중', requester: S.settings.author, inspector: '', opinion: '', photoIds: [], createdAt: String(Date.now()), history: [{ status: '작성중', at: nowStr(), by: S.settings.author }], items: t.items.map(x => ({ text: x.text, std: x.std, result: '', note: '' })) }, loc);
+      i.drawingIds = relatedDrawings(i).filter(x => x.full).map(x => x.d.id);
       S.inspections.push(i); save(); nav('#/insp/' + i.id);
     },
+    linkDrw(iid, did, on) { const i = S.inspections.find(x => x.id === iid); this.collectInsp(i); i.drawingIds = (i.drawingIds || []).filter(x => x !== did); if (on) i.drawingIds.push(did); save(); rerender(); },
     collectInsp(i) {
       if (i.status === '작성중' && $('#edong')) Object.assign(i, readLoc('e'), { date: $('#eDate').value, matters: $('#eMatters').value, requester: $('#eReq').value.trim() });
       if ($('#eIns') && !$('#eIns').disabled) { i.inspector = $('#eIns').value.trim(); i.opinion = $('#eOp').value; }
@@ -538,6 +701,67 @@
     },
     async delIssue(id) { if (!confirm('지적사항을 삭제할까요?')) return; const x = S.issues.find(v => v.id === id); for (const p of x.photoIds.concat(x.actionPhotoIds || [])) await DB.delPhoto(p); S.issues = S.issues.filter(v => v.id !== id); save(); nav('#/records/issue'); },
 
+    async onDrawings(input) {
+      const files = Array.from(input.files || []); input.value = ''; if (!files.length) return;
+      const ids = [];
+      for (const file of files) {
+        const mime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : /\.(jpe?g|png|webp)$/i.test(file.name) ? 'image/jpeg' : '');
+        if (!(mime === 'application/pdf' || mime.startsWith('image/'))) { toast(file.name + ': PDF·이미지만 올릴 수 있습니다'); continue; }
+        const d = { id: uid(), projectId: S.cur, fileName: file.name, mime, size: file.size, status: '인식중', statusText: '대기 중', info: {}, tags: {}, fields: {}, createdAt: Date.now() };
+        await DB.putFile({ id: d.id, blob: file }); S.drawings.push(d); ids.push(d.id);
+      }
+      await save(true); rerender();
+      for (const id of ids) { await this.runExtract(id); if (location.hash.startsWith('#/drawings')) rerender(); }
+      const pg = $('#drwProg'); if (pg) pg.textContent = '';
+      if (!ids.length) return;
+      if (ids.length > 1) toast(`${ids.length}장 인식 완료 — 차례로 확인해 주세요`);
+      const first = ids.map(id => S.drawings.find(x => x.id === id)).find(x => x && x.status === '확인필요') || S.drawings.find(x => x.id === ids[0]);
+      nav('#/drawing/' + first.id + '/review');
+    },
+    async runExtract(id) {
+      const d = S.drawings.find(x => x.id === id); const f = await DB.getFile(id); if (!d || !f) return;
+      d.status = '인식중';
+      const set = t => { d.statusText = t; const el = $('#ds-' + id); if (el) el.textContent = t; const pg = $('#drwProg'); if (pg) pg.textContent = d.fileName + ' — ' + t; };
+      try {
+        const r = await DRW.extract(f.blob, d.mime, set);
+        Object.assign(d, { lines: r.lines.slice(0, 400), method: r.method, pages: r.pages, thumb: r.thumb });
+        applyParsed(d); d.status = '확인필요'; delete d.error;
+      } catch (e) { console.warn('drawing extract', e); d.status = '인식실패'; d.error = e.message || String(e); }
+      d.statusText = ''; await save(true);
+    },
+    reviewPreview(id) { const d = S.drawings.find(x => x.id === id); const el = $('#rApply'); if (d && el) el.innerHTML = reviewApplyHtml(d, readReview()); },
+    applyReview(id) {
+      const d = S.drawings.find(x => x.id === id); const v = readReview(); const ck = s => { const e = $(s); return !!(e && e.checked); };
+      let pr = d.projectId ? S.projects.find(x => x.id === d.projectId) : P(); const msgs = [];
+      if (!pr) {
+        if (ck('#aNewProj')) {
+          const plan = planStruct(null, v.dongs, v.floors, v.hos, v.units);
+          const dongs = plan.adds.map(x => ({ name: x.name, minF: x.minF, maxF: x.maxF, units: x.units }));
+          if (!dongs.length) { dongs.push({ name: '101동', minF: -1, maxF: 15, units: 4 }); msgs.push('동 미인식 → 101동 기본값'); }
+          pr = { id: uid(), name: v.projectName || '새 현장', location: v.address, dongs, createdAt: Date.now(), curStage: null };
+          S.projects.push(pr); S.cur = pr.id; msgs.unshift('새 현장 등록');
+        }
+      } else {
+        if (ck('#aName')) { pr.name = v.projectName; msgs.push('현장명'); }
+        if (ck('#aLoc')) { pr.location = v.address; msgs.push('위치'); }
+        if (ck('#aStruct')) {
+          const plan = planStruct(pr, v.dongs, v.floors, v.hos, v.units);
+          plan.adds.forEach(x => pr.dongs.push({ name: x.name, minF: x.minF, maxF: x.maxF, units: x.units }));
+          plan.mods.forEach(m => Object.assign(pr.dongs.find(x => x.name === m.name), m.to));
+          if (plan.adds.length || plan.mods.length) msgs.push(`구조(동 추가 ${plan.adds.length}·확장 ${plan.mods.length})`);
+        }
+      }
+      if (pr) S.drawings.forEach(x => { if (!x.projectId) x.projectId = pr.id; });
+      d.info = { projectName: v.projectName, address: v.address, title: v.title, number: v.number, scale: v.scale, discipline: v.discipline };
+      d.tags = { dongs: v.dongs, floors: v.floors, hos: v.hos, trades: v.trades, units: v.units };
+      d.status = '확인완료'; save();
+      toast('적용: ' + (msgs.length ? msgs.join(', ') + ' + 도면 태그' : '도면 태그 저장'));
+      const next = S.drawings.find(x => x.status === '확인필요' && x.projectId === S.cur);
+      nav(next ? '#/drawing/' + next.id + '/review' : '#/drawings');
+    },
+    async reparse(id) { if (!confirm('파일을 다시 읽어 인식합니다. 이 화면에서 고친 값은 사라집니다. 계속할까요?')) return; toast('다시 인식 중…'); await this.runExtract(id); rerender(); },
+    async dlDrawing(id) { const d = S.drawings.find(x => x.id === id); const f = await DB.getFile(id); if (!f) return; const a = document.createElement('a'); a.href = URL.createObjectURL(f.blob); a.download = d.fileName; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000); },
+    async delDrawing(id) { if (!confirm('이 도면을 삭제할까요? (검측요청서의 연결도 해제됩니다)')) return; await DB.delFile(id); S.drawings = S.drawings.filter(x => x.id !== id); S.inspections.forEach(i => { if (i.drawingIds) i.drawingIds = i.drawingIds.filter(x => x !== id); }); save(); nav('#/drawings'); },
     newTpl() { const t = { id: uid(), trade: '기타', name: '새 체크리스트', items: [] }; S.templates.push(t); save(); nav('#/tpl/' + t.id); },
     dupTpl(id) { const o = S.templates.find(x => x.id === id); const t = JSON.parse(JSON.stringify(o)); t.id = uid(); t.name += ' (복사)'; t.builtin = false; t.items.forEach(i => i.id = uid()); S.templates.push(t); save(); nav('#/tpl/' + t.id); },
     delTpl(id) { if (!confirm('템플릿을 삭제할까요? (이미 작성한 검측서는 유지됩니다)')) return; S.templates = S.templates.filter(x => x.id !== id); save(); nav('#/tpl'); },
@@ -564,12 +788,16 @@
       if (!confirm('이 현장과 관련된 검측·기록·사진이 모두 삭제됩니다. 계속할까요?')) return;
       S.projects = S.projects.filter(p => p.id !== id); ['inspections', 'logs', 'issues'].forEach(k => S[k] = S[k].filter(x => x.projectId !== id)); delete S.progress[id];
       for (const p of await DB.allPhotos()) if (p.projectId === id) await DB.delPhoto(p.id);
+      for (const d of (S.drawings || []).filter(x => x.projectId === id)) await DB.delFile(d.id);
+      S.drawings = (S.drawings || []).filter(x => x.projectId !== id);
       if (S.cur === id) S.cur = S.projects[0] ? S.projects[0].id : null; save(); nav('#/settings');
     },
     setAuthor(v) { S.settings.author = v.trim(); save(); toast('저장됨'); },
     async exportJSON() {
       await save(true);
-      const data = { app: 'sigong-guide', version: 1, exportedAt: new Date().toISOString(), state: S, photos: await DB.allPhotos() };
+      const files = [];
+      for (const f of await DB.allFiles()) files.push({ id: f.id, mime: f.blob.type, data: await blobToDataURL(f.blob) });
+      const data = { app: 'sigong-guide', version: 2, exportedAt: new Date().toISOString(), state: S, photos: await DB.allPhotos(), files };
       const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `시공관리_백업_${today()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       toast('백업 파일을 내보냈습니다');
@@ -580,13 +808,15 @@
         const data = JSON.parse(await f.text());
         if (data.app !== 'sigong-guide' || !data.state) throw new Error('이 앱의 백업 파일이 아닙니다');
         if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요? (현재 데이터는 사라집니다)')) return;
-        S = Object.assign(defaults(), data.state); await DB.clearPhotos(); photoCache.clear();
+        S = Object.assign(defaults(), data.state); await DB.clearPhotos(); photoCache.clear(); Object.keys(filt).forEach(k => filt[k] = {});
         for (const p of data.photos || []) await DB.putPhoto(p);
+        await DB.clearFiles();
+        for (const f of data.files || []) await DB.putFile({ id: f.id, blob: await (await fetch(f.data)).blob() });
         await save(true); toast('가져오기 완료'); nav('#/'); route();
       } catch (e) { alert('가져오기 실패: ' + e.message); }
       input.value = '';
     },
-    async wipe() { if (!confirm('모든 현장·검측·기록·사진을 삭제합니다. 백업하셨나요?')) return; S = defaults(); await DB.clearPhotos(); photoCache.clear(); await save(true); nav('#/'); route(); }
+    async wipe() { if (!confirm('모든 현장·검측·기록·사진을 삭제합니다. 백업하셨나요?')) return; S = defaults(); await DB.clearPhotos(); await DB.clearFiles(); photoCache.clear(); Object.keys(filt).forEach(k => filt[k] = {}); await save(true); nav('#/'); route(); }
   };
 
   /* ---------- 시작 ---------- */

@@ -1,0 +1,2 @@
+pdfjs-dist 6.5.438
+tesseract.js 7.0.0 (core 7.0.0 + kor/eng traineddata loaded from cdn.jsdelivr.net on first OCR, then cached)

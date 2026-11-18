@@ -4,11 +4,12 @@ window.DB = (function () {
   function open() {
     if (dbp) return dbp;
     dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('sigong-guide', 1);
+      const r = indexedDB.open('sigong-guide', 2);
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
         if (!d.objectStoreNames.contains('photos')) d.createObjectStore('photos', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'id' });
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
@@ -35,6 +36,11 @@ window.DB = (function () {
     getPhoto: id => tx('photos', 'readonly', s => s.get(id)),
     delPhoto: id => tx('photos', 'readwrite', s => s.delete(id)),
     allPhotos: () => tx('photos', 'readonly', s => s.getAll()),
-    clearPhotos: () => tx('photos', 'readwrite', s => s.clear())
+    clearPhotos: () => tx('photos', 'readwrite', s => s.clear()),
+    putFile: f => tx('files', 'readwrite', s => s.put(f)),
+    getFile: id => tx('files', 'readonly', s => s.get(id)),
+    delFile: id => tx('files', 'readwrite', s => s.delete(id)),
+    allFiles: () => tx('files', 'readonly', s => s.getAll()),
+    clearFiles: () => tx('files', 'readwrite', s => s.clear())
   };
 })();
