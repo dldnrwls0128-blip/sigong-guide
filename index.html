@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f4e79">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="시공관리">
+<title>시공관리 가이드</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header id="top"><button id="back" aria-label="뒤로">‹</button><h1 id="title">시공관리 가이드</h1><span class="sp"></span></header>
+<main id="main"><p class="muted">불러오는 중…</p></main>
+<nav id="tabbar">
+  <a href="#/" data-tab="dash"><i>🏠</i>홈</a>
+  <a href="#/stages" data-tab="stages"><i>📋</i>공정</a>
+  <a href="#/insp" data-tab="insp"><i>📝</i>검측</a>
+  <a href="#/records/log" data-tab="records"><i>📒</i>기록</a>
+  <a href="#/more" data-tab="more"><i>⚙️</i>더보기</a>
+</nav>
+<div id="toast"></div>
+<div id="modal" hidden></div>
+<noscript>자바스크립트를 켜야 사용할 수 있습니다.</noscript>
+<script src="js/data.js"></script>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

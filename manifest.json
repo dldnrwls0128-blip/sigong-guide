@@ -1,0 +1,16 @@
+{
+  "name": "시공관리 가이드 - 철거부터 준공까지",
+  "short_name": "시공관리",
+  "description": "공정 가이드, 검측 체크리스트, 검측요청서, 작업일지·사진·지적사항 관리",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f5f8",
+  "theme_color": "#1f4e79",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
