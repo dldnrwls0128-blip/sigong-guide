@@ -372,7 +372,9 @@
       <button class="btn primary" onclick="location.hash='#/project/new'">+ 현장 등록</button></div>
     <div class="card form"><h3>사용자</h3><label>내 이름(검측요청서 요청자 기본값)<input id="sAuthor" value="${esc(S.settings.author)}" onchange="App.setAuthor(this.value)"></label></div>
     <div class="card"><h3>데이터 백업</h3><p class="muted small">모든 데이터는 이 기기 브라우저에만 저장됩니다. 기기 변경·브라우저 데이터 삭제 전에 꼭 백업하세요. (사진 포함 JSON)</p>
-      <div class="row"><button class="btn primary" onclick="App.exportJSON()">⬇ 백업 내보내기</button><label class="btn">⬆ 백업 가져오기<input type="file" accept="application/json,.json" hidden onchange="App.importJSON(this)"></label></div>
+      <div class="row"><button class="btn primary" onclick="App.exportJSON()">⬇ 백업 내보내기</button><label class="btn">⬆ 백업 가져오기(전체 교체)<input type="file" accept="application/json,.json" hidden onchange="App.importJSON(this)"></label></div>
+      <label class="btn primary block" style="margin-top:8px">➕ 도면/현장 불러오기 (합치기)<input type="file" id="mergeInput" accept="application/json,.json" hidden onchange="App.mergeJSON(this)"></label>
+      <p class="muted small">‘합치기’는 지금 데이터는 그대로 두고, 파일 안의 현장·도면(·검측·기록)을 <b>없는 것만 추가</b>합니다. 같은 현장이면 빠진 동만 더합니다. ‘백업 가져오기’는 지금 데이터를 모두 지우고 바꿉니다.</p>
       <p class="muted small" id="usage"></p></div>
     <div class="card"><h3>초기화</h3><button class="btn ghost danger-t" onclick="App.wipe()">모든 데이터 삭제</button></div>`;
   }
@@ -437,6 +439,7 @@
     const pend = list.filter(d => d.status === '확인필요').length;
     return `<div class="card"><h3>도면 올리기</h3><p class="muted small">PDF·사진(JPG/PNG)을 여러 개 한꺼번에 올릴 수 있습니다. 표제란의 공사명·도면명·도면번호·축척·동·층·호수·공종을 자동으로 읽어 <b>확인 화면</b>을 보여 줍니다. 확인 전에는 현장 정보를 바꾸지 않습니다.</p>
       <label class="btn primary block">📤 도면 파일 선택<input type="file" id="drwInput" accept="application/pdf,.pdf,image/*" multiple hidden onchange="App.onDrawings(this)"></label>
+      <label class="btn block">➕ 도면 묶음 불러오기 (.json, 합치기)<input type="file" accept="application/json,.json" hidden onchange="App.mergeJSON(this)"></label>
       <p class="muted small">※ CAD에서 내보낸 PDF는 글자를 바로 읽습니다(오프라인 가능). 스캔 PDF·사진은 OCR을 쓰며, <b>OCR은 처음 한 번 인터넷 연결이 필요</b>합니다(엔진·한글 데이터 약 수 MB 내려받은 뒤 기기에 저장).</p><div id="drwProg"></div></div>
       ${pend ? `<p class="small"><span class="badge b-검측요청">확인 필요 ${pend}</span> 인식 결과를 확인해 주세요.</p>` : ''}
       <div class="filters"><input type="search" placeholder="도면번호·도면명 검색" value="${esc(f.q || '')}" onchange="App.setFilter('drw','q',this.value)">
@@ -801,6 +804,41 @@
       const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `시공관리_백업_${today()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       toast('백업 파일을 내보냈습니다');
+    },
+    async mergeJSON(input) {
+      const f = input.files[0]; input.value = ''; if (!f) return;
+      try {
+        toast('파일 읽는 중…');
+        const data = JSON.parse(await f.text());
+        if (data.app !== 'sigong-guide' || !data.state) throw new Error('이 앱의 백업/불러오기 파일이 아닙니다');
+        const st = data.state; const n = { proj: 0, dong: 0, drw: 0, other: 0 };
+        const has = (arr, id) => arr.some(x => x.id === id);
+        const pre = `현장 ${(st.projects || []).length}개, 도면 ${(st.drawings || []).length}장, 검측 ${(st.inspections || []).length}건, 기록 ${(st.logs || []).length + (st.issues || []).length}건`;
+        if (!confirm(`파일 내용: ${pre}\n\n지금 데이터는 지우지 않고, 없는 것만 추가합니다. 계속할까요?`)) return;
+        for (const p of st.projects || []) {
+          const ex = S.projects.find(x => x.id === p.id);
+          if (!ex) { S.projects.push(p); n.proj++; continue; }
+          (p.dongs || []).forEach(d => { if (!ex.dongs.some(x => x.name === d.name)) { ex.dongs.push(d); n.dong++; } });
+          if (!ex.name && p.name) ex.name = p.name; if (!ex.location && p.location) ex.location = p.location;
+        }
+        const fileIds = new Set((data.files || []).map(x => x.id));
+        for (const d of st.drawings || []) {
+          if (has(S.drawings, d.id)) continue;
+          if (!fileIds.has(d.id) && !(await DB.getFile(d.id))) continue;
+          S.drawings.push(d); n.drw++;
+        }
+        for (const x of data.files || []) if (S.drawings.some(d => d.id === x.id) && !(await DB.getFile(x.id))) await DB.putFile({ id: x.id, blob: await (await fetch(x.data)).blob() });
+        for (const k of ['inspections', 'logs', 'issues']) for (const x of st[k] || []) if (!has(S[k], x.id)) { S[k].push(x); n.other++; }
+        for (const p of data.photos || []) if (!(await DB.getPhoto(p.id))) await DB.putPhoto(p);
+        for (const [pid, pg] of Object.entries(st.progress || {})) if (!S.progress[pid]) S.progress[pid] = pg;
+        for (const t of st.templates || []) if (!t.builtin && !has(S.templates, t.id)) S.templates.push(t);
+        const imported = (st.projects || []).map(p => S.projects.find(x => x.id === p.id)).filter(Boolean);
+        if (imported.length && S.cur !== imported[0].id && (!S.cur || confirm(`‘${imported[0].name}’ 현장으로 전환할까요?`))) S.cur = imported[0].id;
+        Object.keys(filt).forEach(k => filt[k] = {});
+        await save(true);
+        alert(`불러오기 완료\n새 현장 ${n.proj} · 추가된 동 ${n.dong} · 도면 ${n.drw}장 · 검측/기록 ${n.other}건`);
+        nav('#/drawings'); route();
+      } catch (e) { alert('불러오기 실패: ' + e.message); }
     },
     async importJSON(input) {
       const f = input.files[0]; if (!f) return;
